@@ -1,74 +1,58 @@
-import express from "express"
-import { config } from "dotenv"
-import mongoose from "mongoose"
-import cors from "cors"
-import { v2 as cloudinary } from "cloudinary"
-import multer from "multer"
-import { CloudinaryStorage } from "multer-storage-cloudinary"
-import productRoute from "./routes/productRoute.js"
-import stripeRoute from "./routes/stripeRoute.js"
-import subscriberRoute from "./routes/subscriberRoute.js"
-import { authRouter } from "./controllers/authController.js";
-
-
-config();
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const mongoose = require('mongoose');
+// const booksData = require('./data/books.json');
+// Подключение модели книги
+const Book = require('./models/Book');
 
 const app = express();
-
-
 app.use(cors());
-
-
-app.listen(process.env.PORT, () => console.log(`Server running on ${process.env.PORT} PORT`));
-
-mongoose
-    .connect(process.env.mongoDb)
-    .then(() => console.log('Database is connected'))
-    .catch((error) => console.log(error));
-
 app.use(express.json());
 
-app.use('/product', productRoute);
+const getRandomBook = (books) => {
+  const randomIndex = Math.floor(Math.random() * books.length);
+  const randomBook = books[randomIndex];
+  return randomBook;
+};
 
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
+// Маршрут для получения рандомной книги
+app.get('/books/random', async (req, res) => {
+  try {
+    const books = await Book.find(); // Получаем все книги из базы данных
+    res.json(getRandomBook(books)); // рандомную книгу получаем
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Ошибка получения книги' });
+  }
+});
+// Маршрут для добавления книги
+// Create a new book
+app.post('/books', async (req, res) => {
+  const book = new Book(req.body);
+  try {
+    await book.save();
+    res.status(201).send(book);
+  } catch (err) {
+    res.status(400).send(err);
+  }
+});
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Что-то пошло не так!');
+});
+//тест
+app.get('/health', (req, res) => {
+  res.status(200).json({ message: 'API is working!' });
 });
 
-app.use((req, res, next) => {
-    req.cloudinary = cloudinary;
-    next();
+// Подключение к MongoDB
+const mongoURL = process.env.MONGO_URL;
+mongoose
+  .connect(mongoURL, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('Успешное подключение к MongoDB'))
+  .catch((error) => console.error('Ошибка подключения к MongoDB:', error));
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Сервер запущен на ${port} порту`);
 });
-
-const storage = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: 'images',
-        allowedFormats: ['jpeg', 'png', 'jpg'],
-    }
-});
-
-const parser = multer({ storage: storage });
-
-//ROUTE FOR UPLOADING THE FILE TO CLOUDINARY
-app.post('/upload-image', parser.single('file'), (req, res) => {
-    if (!req.file) {
-        return res.status(400).send('No file uploaded.');
-    }
-
-    try {
-        if (!req.file.path) {
-            throw new Error('File uploaded, but no path available');
-        }
-
-        res.json({ secure_url: req.file.path });
-    } catch (error) {
-        console.error('Error during file upload: ', error);
-        res.status(500).send('Internal server error');
-    }
-});
-
-app.use('/stripe', stripeRoute)
-app.use('/subscriber', subscriberRoute)
-app.use('/auth', authRouter);
